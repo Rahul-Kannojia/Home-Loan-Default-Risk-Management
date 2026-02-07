@@ -1,0 +1,158 @@
+# Use the column names from your original dataframe before it was scaled
+feature_imp = pd.DataFrame({
+    'Value': model.feature_importances_, 
+    'Feature': x_train.columns  # <--- Use the original dataframe columns here
+})
+
+plt.figure(figsize=(10, 20)) # Made it taller to fit 100 features
+sns.barplot(
+    x="Value", 
+    y="Feature", 
+    data=feature_imp.sort_values(by="Value", ascending=False).iloc[:100]
+)
+
+plt.title('Top 100 Features')
+plt.show()============
+==============================================================
+
+
+
+LightGBM :
+Model performance for Training set
+- Confusion Matrix:
+[[7238 2657]
+ [ 184  683]]
+- Accuracy: 0.7360
+- F1-Score: 0.7948
+- Precision : 0.2045
+- Recall : 0.7878
+- ROCAUC : 0.7596
+- Classification Report:
+              precision    recall  f1-score   support
+
+           0       0.98      0.73      0.84      9895
+           1       0.20      0.79      0.32       867
+
+    accuracy                           0.74     10762
+   macro avg       0.59      0.76      0.58     10762
+weighted avg       0.91      0.74      0.79     10762
+
+------------------------------------------------
+Model performance for Test set
+- Confusion Matrix:
+[[3071 1168]
+ [ 143  231]]
+- Accuracy: 0.7158
+- F1-Score: 0.7784
+- Precision : 0.1651
+- Recall : 0.6176
+- ROCAUC : 0.6711
+- Classification Report:
+              precision    recall  f1-score   support
+
+           0       0.96      0.72      0.82      4239
+           1       0.17      0.62      0.26       374
+
+    accuracy                           0.72      4613
+   macro avg       0.56      0.67      0.54      4613
+weighted avg       0.89      0.72      0.78      4613
+
+
+
+
+
+
+
+
+
+====
+prashant.singh@rubixe.com
+
+class_weighted = {0:5,1:1}
+
+============================
+Step1:
+def add_expert_features(df):
+    # 1. Credit-to-Income Ratio: How big is the loan compared to their salary?
+    df['CREDIT_TO_INCOME_RATIO'] = df['AMT_CREDIT'] / (df['AMT_INCOME_TOTAL'] + 0.00001)
+    
+    # 2. Annuity-to-Income Ratio: Can they afford the monthly payment?
+    df['ANNUITY_TO_INCOME_RATIO'] = df['AMT_ANNUITY'] / (df['AMT_INCOME_TOTAL'] + 0.00001)
+    
+    # 3. Credit Term: How many months/years is the loan for?
+    df['CREDIT_TERM'] = df['AMT_ANNUITY'] / (df['AMT_CREDIT'] + 0.00001)
+    
+    # 4. Days Employed Percentage: How much of their adult life have they been working?
+    df['DAYS_EMPLOYED_PERCENT'] = df['DAYS_EMPLOYED'] / (df['DAYS_BIRTH'] + 0.00001)
+    
+    # 5. External Sources Weighted: Combining the three strongest predictors
+    df['EXT_SOURCES_MEAN'] = df[['EXT_SOURCE_1', 'EXT_SOURCE_2', 'EXT_SOURCE_3']].mean(axis=1)
+    
+    return df
+
+# Apply to your main dataframe
+X = add_expert_features(X)
+
+
+Step2:
+Stratified K-Fold Cross-Validation
+--
+from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import roc_auc_score
+import numpy as np
+
+# Use the ratio we calculated earlier
+ratio = (y == 0).sum() / (y == 1).sum()
+
+folds = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+test_preds = np.zeros(len(x_test_scaled))
+oof_preds = np.zeros(len(x_train_scaled))
+
+for fold_, (trn_idx, val_idx) in enumerate(folds.split(x_train_scaled, y_train)):
+    print(f"Training Fold {fold_ + 1}...")
+    
+    # Split data
+    xt_fold, yt_fold = x_train_scaled[trn_idx], y_train.iloc[trn_idx]
+    xv_fold, yv_fold = x_train_scaled[val_idx], y_train.iloc[val_idx]
+    
+    # Optimized LightGBM
+    clf = LGBMClassifier(
+        n_estimators=1000,
+        learning_rate=0.02,
+        num_leaves=31,
+        max_depth=6,
+        min_child_samples=300, # High regularization
+        scale_pos_weight=ratio,
+        reg_alpha=2,
+        reg_lambda=2,
+        colsample_bytree=0.7,
+        subsample=0.8,
+        random_state=42
+    )
+    
+    clf.fit(xt_fold, yt_fold, 
+            eval_set=[(xv_fold, yv_fold)],
+            eval_metric='auc',
+            callbacks=[lgbm.early_stopping(stopping_rounds=100)])
+    
+    # Store validation predictions
+    oof_preds[val_idx] = clf.predict_proba(xv_fold)[:, 1]
+
+print(f"\nFinal CV ROC-AUC: {roc_auc_score(y_train, oof_preds):.4f}")
+
+Step 3:
+Visualizing the Improvement (ROC Curve)
+
+from sklearn.metrics import roc_curve, auc
+
+fpr, tpr, _ = roc_curve(y_train, oof_preds)
+roc_auc = auc(fpr, tpr)
+
+plt.figure(figsize=(8, 6))
+plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlabel('False Positive Rate (1 - Specificity)')
+plt.ylabel('True Positive Rate (Sensitivity)')
+plt.title('Receiver Operating Characteristic (ROC) Curve')
+plt.legend(loc="lower right")
+plt.show()

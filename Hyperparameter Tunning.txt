@@ -1,0 +1,74 @@
+from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold
+from lightgbm import LGBMClassifier
+import numpy as np
+
+# 1. Define the Parameter Grid
+# Ranges are chosen to prevent overfitting
+param_dist = {
+    # Complexity Parameters (Crucial for Overfitting)
+    'num_leaves': [20, 31, 50, 70],          # Keep < 50 for strong regularization
+    'max_depth': [5, 8, 10, 15],             # Keep low to stop memorization
+    'min_child_samples': [20, 50, 100, 200], # Higher = more conservative
+    
+    # Randomness (Prevent sticking to specific features)
+    'subsample': [0.6, 0.8, 1.0],            # % of rows used per tree
+    'colsample_bytree': [0.6, 0.8, 1.0],     # % of columns used per tree
+    
+    # Regularization (L1 and L2)
+    'reg_alpha': [0, 0.1, 0.5, 1.0],
+    'reg_lambda': [0, 0.1, 0.5, 1.0],
+    
+    # Learning
+    'learning_rate': [0.01, 0.05, 0.1]       # Lower is usually better but slower
+}
+
+# 2. Initialize the Base Model
+# Fixed parameters that we don't need to tune right now
+lgbm = LGBMClassifier(
+    n_estimators=500,           # A decent baseline number of trees
+    class_weight='balanced',    # REQUIRED for your 0% Recall issue
+    random_state=42,
+    n_jobs=-1,
+    verbose=-1                  # Silence warnings
+)
+
+# 3. Configure Cross-Validation
+# Must use StratifiedKFold because of the class imbalance
+cv_strategy = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+
+# 4. Run the Random Search
+random_search = RandomizedSearchCV(
+    estimator=lgbm,
+    param_distributions=param_dist,
+    n_iter=20,                  # Try 20 random combinations (increase if you have time)
+    scoring='roc_auc',          # Optimize for AUC, NOT Accuracy
+    cv=cv_strategy,
+    verbose=1,
+    random_state=42,
+    n_jobs=-1                   # Use all CPU cores
+)
+
+print("Starting Hyperparameter Tuning...")
+random_search.fit(X_train, y_train)
+
+# 5. Report Results
+print(f"\nBest ROC-AUC Score: {random_search.best_score_:.4f}")
+print("Best Parameters:")
+print(random_search.best_params_)
+
+
+
+=========================================
+Best ROC-AUC Score: 0.7229
+Best Parameters:
+{'subsample': 1.0, 'reg_lambda': 1.0, 'reg_alpha': 0.5, 'num_leaves': 20, 'min_child_samples': 200, 'max_depth': 10, 'learning_rate': 0.01, 'colsample_bytree': 0.8}
+
+
+
+
+
+
+
+
+
+

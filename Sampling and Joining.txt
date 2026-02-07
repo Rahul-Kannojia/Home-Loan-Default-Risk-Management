@@ -1,0 +1,176 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+# --- STEP 1: Create the "Parent" Sample (Stratified) ---
+print("Loading application_train.csv...")
+app_train = pd.read_csv('application_train.csv')
+
+# Create your 5% Stratified Sample
+parent_sample, _ = train_test_split(
+    app_train,
+    train_size=0.05,  # 5% data
+    stratify=app_train['TARGET'],
+    random_state=42
+)
+
+# EXTRACT THE VIP LIST
+# This is the list of "Selected Users" we want to know about.
+vip_user_ids = parent_sample['SK_ID_CURR'].unique()
+
+print(f"Parent Sample created. We are tracking {len(vip_user_ids)} unique users.")
+
+# --- STEP 2: Filter the "Child" File (Bureau) ---
+print("\nLoading and filtering bureau.csv...")
+
+# 1. Load the full child dataset
+bureau_full = pd.read_csv('bureau.csv')
+
+# 2. THE CRITICAL STEP: Filter using .isin()
+# "Keep the row IF the SK_ID_CURR is inside our vip_user_ids list"
+bureau_filtered = bureau_full[bureau_full['SK_ID_CURR'].isin(vip_user_ids)]
+
+# --- STEP 3: Verify the Integrity ---
+print("-" * 30)
+print(f"Original Bureau Rows:   {len(bureau_full)}")
+print(f"Filtered Bureau Rows:   {len(bureau_filtered)}")
+print(f"Data Reduced by:        {100 * (1 - len(bureau_filtered)/len(bureau_full)):.2f}%")
+
+# Integrity Check:
+# Ensure we didn't accidentally keep any users NOT in our main sample
+orphans = bureau_filtered[~bureau_filtered['SK_ID_CURR'].isin(vip_user_ids)]
+print(f"Orphan rows (Should be 0): {len(orphans)}")
+
+
+
+=============================
+def load_and_filter(file_name, ids):
+    df = pd.read_csv(file_name)
+    # Only keep rows that belong to our sampled customers
+    return df[df['SK_ID_CURR'].isin(ids)]
+
+# Example: Filtering the Bureau table
+bureau_sample = load_and_filter('bureau.csv', sample_ids)
+prev_app_sample = load_and_filter('previous_application.csv', sample_ids)
+
+================================Rewrite code======================
+def load_and_filter(df, ids):
+    # Only keep rows that belong to our sampled customers
+    return df[df['SK_ID_CURR'].isin(ids)]
+
+# Example: Filtering the Bureau table
+data_bureau= bureau_df.copy()
+data_prev_app= previous_application_df.copy()
+
+data_bureau_sample = load_and_filter(data_bureau, sample_ids)
+data_prev_app_sample = load_and_filter(data_prev_app, sample_ids)
+
+===============================================
+
+# 1. Aggregate Bureau (Numerical columns only for this example)
+bureau_agg = bureau_sample.groupby('SK_ID_CURR').agg({
+    'DAYS_CREDIT': ['mean', 'max'],
+    'AMT_CREDIT_SUM': ['sum', 'mean']
+})
+
+# Flatten the multi-level columns (e.g., 'DAYS_CREDIT_mean')
+bureau_agg.columns = ['_'.join(col).strip() for col in bureau_agg.columns.values]
+bureau_agg.reset_index(inplace=True)
+
+# 2. Join to the Main Sample
+final_df = app_sample.merge(bureau_agg, on='SK_ID_CURR', how='left')
+
+# 3. Fill NaN for customers who had no bureau history
+final_df = final_df.fillna(0)
+
+print(f"Final shape after join: {final_df.shape}")
+
+
+==============================================================
+
+
+def sample_and_filter_1(df, ids):
+    # Only keep rows that belong to our sampled customers
+    return df[df['SK_ID_CURR'].isin(ids)]
+
+# Example: Filtering the Bureau table
+data_bureau= bureau_df.copy()
+data_prev_app= previous_application_df.copy()
+
+data_bureau_sample = sample_and_filter_1(data_bureau, sample_ids)
+data_prev_app_sample = sample_and_filter_1(data_prev_app, sample_ids)
+
+
+==========================================
+
+=======================================================
+def process_child_table_complete(df, prefix, valid_ids):
+        
+    # 1. Filter (Crucial: Do this BEFORE One-Hot Encoding to save memory)
+    df = df[df['SK_ID_CURR'].isin(valid_ids)]
+    
+    # 2. One-Hot Encode Categorical Columns
+    # We use dummy_na=True to capture missing values as their own category
+    df = pd.get_dummies(df, dummy_na=True)
+    
+    # 3. Aggregate
+    # For OHE columns, 'mean' = percentage, 'sum' = count
+    # For numeric columns, we usually want min/max/mean/sum
+    
+    # Separate the ID from the features
+    features = df.drop(columns=['SK_ID_CURR'])
+    
+    # Aggregate everything by ID
+    agg_df = features.groupby(df['SK_ID_CURR']).agg(['min', 'max', 'mean', 'sum'])
+    
+    # 4. Rename Columns (Flatten the header)
+    agg_df.columns = [f'{prefix}_{col[0]}_{col[1]}' for col in agg_df.columns]
+    agg_df.reset_index(inplace=True)
+
+    return agg_df
+	
+# --- Execute for all tables ---
+print("Processing Previous Applications...")
+previous_app_agg = process_child_table('previous_application_df', 'PREV')
+
+print("Processing POS Cash...")
+posh_cash_agg = process_child_table('posh_cash_balance_df', 'POS')
+
+print("Processing Installments...")
+installment_pay_agg = process_child_table('installments_pay_df', 'INST')
+
+print("Processing Credit Card...")
+credit_card_agg = process_child_table('credit_card_bal_df', 'CC')
+
+=============================== The GRand Join===================
+Step: 4: The Grand Join
+
+=========================
+
+# Start with the application sample
+final_df = application_df_sample.copy()
+
+# List of all aggregated dataframes
+all_dfs = [bureau_final, previous_app_agg, posh_cash_agg, installment_pay_agg, credit_card_agg]
+
+# Loop through and merge
+for df in all_dfs:
+    # 1. Check if the dataframe has MultiIndex columns
+    if isinstance(df.columns, pd.MultiIndex):
+        # Flatten the columns: e.g., ('AMT_CREDIT', 'mean') -> 'AMT_CREDIT_mean'
+        # We join the levels with an underscore
+        df.columns = ['_'.join(col).strip() if col[1] else col[0] for col in df.columns.values]
+    
+    # 2. Rename the ID column back if it got mangled (e.g., 'SK_ID_CURR_')
+    if 'SK_ID_CURR_' in df.columns:
+        df.rename(columns={'SK_ID_CURR_': 'SK_ID_CURR'}, inplace=True)
+        
+    # 3. Perform the merge
+    final_df = final_df.merge(df, on='SK_ID_CURR', how='left')
+
+# Fill missing values (created by the join) with 0
+final_df = final_df.fillna(0)
+
+print(f"Final Dataset Shape: {final_df.shape}")
+
+=================
+LightGBM or XGBoost
